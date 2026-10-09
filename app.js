@@ -84,7 +84,8 @@
     const field = (label, el, hint) => h('div', {}, h('label', {}, label), el, hint ? h('div', { class: 'muted' }, hint) : null);
     f.name = h('input', { type: 'text', autocomplete: 'name', value: p.name || '' });
     f.email = h('input', { type: 'email', autocomplete: 'email', inputmode: 'email', value: p.email || '' });
-    f.area = h('select', {}, h('option', { value: '' }, 'Selecione…'), Q.profile.areas.map((a) => h('option', { value: a, selected: p.area === a }, a)));
+    f.role = h('select', {}, h('option', { value: '' }, 'Selecione…'), Q.profile.roles.map((a) => h('option', { value: a, selected: p.role === a }, a)));
+    f.department = h('input', { type: 'text', maxlength: 80, value: p.department || '', placeholder: 'Escreva a sua área', autocomplete: 'off' });
     f.consent = h('input', { type: 'checkbox', checked: !!(p.consent && p.consent.accepted) });
     const err = h('div', { class: 'err' });
 
@@ -93,7 +94,7 @@
         h('p', {}, 'Registre o modelo avaliado, tire fotos e responda ao questionário. Funciona sem internet depois do primeiro acesso.')) : null,
       h('div', { class: 'card' }, h('h2', {}, 'Quem é você'),
         field('Nome *', f.name), field('E-mail *', f.email, 'Você informa o e-mail; o app não verifica a identidade.'),
-        field('Área de atuação', f.area)),
+        field('Função', f.role), field('Área', f.department)),
       h('div', { class: 'card' }, h('h2', {}, 'Privacidade (LGPD)'),
         h('p', { class: 'muted' }, 'Seus dados, respostas e fotos ficam neste aparelho até você exportá-los e enviá-los à equipe organizadora do benchmark da Volvo. Usamos só para analisar a comparação entre caminhões. Não coletamos localização. Evite fotografar rostos, crachás e placas de pessoas. Você pode apagar tudo do aparelho a qualquer momento.'),
         h('label', { class: 'check' }, f.consent, h('span', {}, 'Li e concordo com o uso dos meus dados para este benchmark. *'))),
@@ -107,7 +108,7 @@
           if (!f.consent.checked) { f.consent.classList.add('invalid'); err.textContent = 'É preciso concordar para continuar.'; return; }
           const wasAccepted = p.consent && p.consent.accepted;
           profile = {
-            id: p.id || uid(), name, email, area: f.area.value,
+            id: p.id || uid(), name, email, role: f.role.value, department: f.department.value.trim(),
             consent: wasAccepted ? p.consent : { accepted: true, version: PRIVACY_VERSION, at: now() }
           };
           try { await kvSet('profile', profile); } catch (e) { err.textContent = 'Não foi possível salvar: ' + e.message; return; }
@@ -347,11 +348,11 @@
         manifest.evaluations.push({ ...e, photos: pf });
       }
 
-      const wideHead = ['ID avaliação', 'Hora de início', 'Hora de conclusão', 'Status', 'E-mail', 'Nome', 'Área de Atuação', 'Marca', 'Modelo', 'Nº de fotos', 'Versão do questionário', 'Observações gerais', 'Fotos: Panfleto / ficha técnica'];
+      const wideHead = ['ID avaliação', 'Hora de início', 'Hora de conclusão', 'Status', 'E-mail', 'Nome', 'Função', 'Área', 'Marca', 'Modelo', 'Nº de fotos', 'Versão do questionário', 'Observações gerais', 'Fotos: Panfleto / ficha técnica'];
       Q.sections.forEach((s) => wideHead.push('Nota: ' + s.label, 'Comentários: ' + s.label, 'Fotos: ' + s.label));
       const wide = [wideHead], long = [['ID avaliação', 'Marca', 'Modelo', 'Nome', 'E-mail', 'Item', 'Nota', 'N/A', 'Comentário', 'Nº de fotos do item']];
       for (const e of evals) {
-        const row = [e.id, fmtDate(e.createdAt), e.status === 'done' ? fmtDate(e.updatedAt) : '', e.status === 'done' ? 'Concluída' : 'Rascunho', profile.email, profile.name, profile.area, e.brand, e.model, (byEval[e.id] || []).length, e.questionnaireVersion, e.generalComment || '', (byEval[e.id] || []).filter((p) => areaKey(p) === 'ficha').length];
+        const row = [e.id, fmtDate(e.createdAt), e.status === 'done' ? fmtDate(e.updatedAt) : '', e.status === 'done' ? 'Concluída' : 'Rascunho', profile.email, profile.name, profile.role, profile.department, e.brand, e.model, (byEval[e.id] || []).length, e.questionnaireVersion, e.generalComment || '', (byEval[e.id] || []).filter((p) => areaKey(p) === 'ficha').length];
         Q.sections.forEach((s) => {
           const a = e.answers[s.id] || {};
           const np = (byEval[e.id] || []).filter((p) => areaKey(p) === s.id).length;
@@ -389,6 +390,10 @@
     try {
       db = await openDB();
       profile = await kvGet('profile');
+      if (profile && 'area' in profile) { // perfil de versão antiga: 'área de atuação' virou 'Função'
+        if (!profile.role) profile.role = Q.profile.roles.includes(profile.area) ? profile.area : '';
+        delete profile.area; await kvSet('profile', profile);
+      }
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
       if (profile) screenHome(); else screenProfile(true);
     } catch (e) {

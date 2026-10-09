@@ -1,10 +1,20 @@
 // Service worker: deixa o app funcionar offline depois da primeira abertura online.
-const CACHE = "fenatran-benchmark-v4";
+const CACHE = "fenatran-benchmark-v7";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./questionnaire.js", "./export.js",
   "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: "reload" ignora o cache HTTP do navegador/servidor, para nunca guardar arquivos velhos
+  // ao publicar uma versão nova (o GitHub Pages permite cache de alguns minutos).
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(ASSETS.map((u) =>
+        fetch(new Request(u, { cache: "reload" })).then((r) => {
+          if (!r.ok) throw new Error("Falha ao baixar " + u + ": " + r.status);
+          return c.put(u, r);
+        }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
