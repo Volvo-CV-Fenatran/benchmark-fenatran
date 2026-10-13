@@ -4,7 +4,9 @@
   const app = document.getElementById('app');
   const titleEl = document.getElementById('title');
   const saveEl = document.getElementById('save-state');
-  const MAX_PHOTOS = 20, MAX_SIDE = 1600, JPEG_Q = 0.8;
+  // Fotos em alta resolução: lado maior até 4096 px (~12 MP, cobre a foto padrão de celular sem reduzir) e JPEG qualidade 0,92.
+  // 4096 px também respeita o limite de área do canvas do iPhone (~16,7 MP).
+  const MAX_PHOTOS = 20, MAX_SIDE = 4096, JPEG_Q = 0.92;
   const PRIVACY_VERSION = 'lgpd-draft-1';
 
   // ---------- util ----------
@@ -185,7 +187,9 @@
     const w0 = img.width || img.naturalWidth, h0 = img.height || img.naturalHeight;
     const k = Math.min(1, MAX_SIDE / Math.max(w0, h0));
     const c = document.createElement('canvas'); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, c.width, c.height);
     if (img.close) img.close();
     // Re-codificar em JPEG remove EXIF (incluindo localização).
     return new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('Falha ao comprimir')), 'image/jpeg', JPEG_Q));
@@ -341,7 +345,9 @@
           const k = areaKey(p);
           n[k] = (n[k] || 0) + 1;
           const path = 'fotos/' + e.id + '/' + (k === 'ficha' ? '00_ficha_tecnica' : k) + '/foto-' + String(n[k]).padStart(2, '0') + '.jpg';
-          files.push({ name: path, data: new Uint8Array(await p.blob.arrayBuffer()) });
+          // CRC calculado uma foto por vez; o Blob em si não é copiado para a memória.
+          const crc = Exporter.crc32(new Uint8Array(await p.blob.arrayBuffer()));
+          files.push({ name: path, blob: p.blob, crc, size: p.blob.size });
           pf.push({ item: k, itemLabel: labelOf(k), file: path, caption: p.caption || '', bytes: p.blob.size, createdAt: p.createdAt });
           photoRows.push([e.id, e.brand, e.model, labelOf(k), path, p.caption || '', Math.round(p.blob.size / 1024), fmtDate(p.createdAt)]);
         }
@@ -373,15 +379,46 @@
   function showExportDialog(blob, fileName, nEval, nPhotos) {
     const file = new File([blob], fileName, { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
-    const close = () => { URL.revokeObjectURL(url); m.remove(); };
-    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    let canShare = false;
+    // O Chrome do Android só deixa compartilhar alguns tipos de arquivo (imagem, PDF, texto...) e costuma recusar .zip.
+    // O Safari do iPhone aceita. Por isso o botão "Compartilhar" só aparece quando o aparelho diz que consegue.
+    try { canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })); } catch (_) { canShare = false; }
+
+    const close = () => { setTimeout(() => URL.revokeObjectURL(url), 1000); m.remove(); };
+    const status = h('p', { class: 'muted', 'aria-live': 'polite' }, '');
+    const help = isAndroid
+      ? 'Android: depois de baixar, abra a notificação do download ou o app Arquivos (pasta Downloads), toque e segure o arquivo, escolha Compartilhar (ou Enviar) e selecione Teams, OneDrive ou Outlook.'
+      : 'Depois de baixar, envie o arquivo para a pasta do SharePoint da equipe (ou pelo Teams / Outlook).';
+
+    const download = () => {
+      // clique programático num <a>: funciona em Chrome/Android e Safari/iPhone, também com o app instalado
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.style.display = 'none';
+      document.body.append(a); a.click(); a.remove();
+      status.textContent = 'Download iniciado. ' + help;
+    };
+    const share = async () => {
+      try {
+        await navigator.share({ files: [file], title: 'Benchmark FENATRAN' });
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // a pessoa fechou a folha de compartilhamento
+        download();
+        status.textContent = 'Este aparelho não permitiu compartilhar o arquivo direto, então o ZIP foi baixado. ' + help;
+      }
+    };
+
     const m = h('div', { class: 'modal' }, h('div', {},
       h('h2', {}, 'Arquivo pronto'),
       h('p', {}, nEval + ' avaliações, ' + nPhotos + ' fotos, ' + (blob.size / 1048576).toFixed(1) + ' MB.'),
       h('p', { class: 'muted' }, 'Envie para o canal indicado pela equipe organizadora. Os dados continuam no aparelho até você apagá-los.'),
-      canShare ? h('button', { class: 'block', onclick: async () => { try { await navigator.share({ files: [file], title: 'Benchmark FENATRAN' }); } catch (_) { /* cancelado */ } } }, 'Compartilhar…') : null,
-      h('a', { href: url, download: fileName }, h('button', { class: canShare ? 'secondary block' : 'block', type: 'button' }, 'Baixar ZIP')),
-      h('button', { class: 'secondary block', onclick: close }, 'Fechar')));
+      canShare ? h('button', { type: 'button', class: 'block', onclick: share }, 'Compartilhar…') : null,
+      h('button', { type: 'button', class: canShare ? 'secondary block' : 'block', onclick: download }, 'Baixar ZIP'),
+      canShare ? null : h('p', { class: 'muted' }, isAndroid
+        ? 'No Android o navegador não deixa compartilhar arquivos ZIP direto do app. Toque em Baixar ZIP e depois compartilhe o arquivo baixado.'
+        : 'Este navegador não permite compartilhar o arquivo direto. Toque em Baixar ZIP.'),
+      status,
+      h('button', { type: 'button', class: 'secondary block', onclick: close }, 'Fechar')));
     document.body.append(m);
   }
 

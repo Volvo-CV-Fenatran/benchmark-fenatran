@@ -28,22 +28,25 @@
     let offset = 0;
     for (const f of files) {
       const name = enc.encode(f.name);
-      const data = f.data;
-      const crc = crc32(data);
+      // f.data (bytes em memória) ou f.blob + f.crc + f.size (foto: o navegador lê o Blob só na hora de montar o ZIP,
+      // então centenas de MB de fotos em alta resolução não ficam todos na memória ao mesmo tempo).
+      const data = f.blob ? f.blob : f.data;
+      const size = f.blob ? f.size : f.data.length;
+      const crc = f.blob ? f.crc : crc32(f.data);
       const lh = new DataView(new ArrayBuffer(30));
       lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
       lh.setUint16(8, 0, true); lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
-      lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
       lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
       parts.push(new Uint8Array(lh.buffer), name, data);
       const ch = new DataView(new ArrayBuffer(46));
       ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
       ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dosTime, true);
-      ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true);
-      ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+      ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true); ch.setUint32(20, size, true);
+      ch.setUint32(24, size, true); ch.setUint16(28, name.length, true);
       ch.setUint32(42, offset, true);
       central.push(new Uint8Array(ch.buffer), name);
-      offset += 30 + name.length + data.length;
+      offset += 30 + name.length + size;
     }
     let cdSize = 0;
     for (const c of central) cdSize += c.length;

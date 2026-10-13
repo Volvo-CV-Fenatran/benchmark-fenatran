@@ -1,5 +1,5 @@
 // Service worker: deixa o app funcionar offline depois da primeira abertura online.
-const CACHE = "fenatran-benchmark-v7";
+const CACHE = "fenatran-benchmark-v9";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./questionnaire.js", "./export.js",
   "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
