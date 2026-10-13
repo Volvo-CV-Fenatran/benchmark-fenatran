@@ -13,9 +13,16 @@
     }
     return t;
   })();
-  function crc32(u8) {
-    let c = 0xFFFFFFFF;
+  function crcUpdate(c, u8) {
     for (let i = 0; i < u8.length; i++) c = TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+    return c;
+  }
+  function crc32(u8) { return (crcUpdate(0xFFFFFFFF, u8) ^ 0xFFFFFFFF) >>> 0; }
+  // CRC de um Blob grande (vídeo) lendo em pedaços de 4 MB, sem carregar o arquivo inteiro na memória.
+  async function crc32Blob(blob) {
+    const CH = 4 * 1048576;
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < blob.size; i += CH) c = crcUpdate(c, new Uint8Array(await blob.slice(i, i + CH).arrayBuffer()));
     return (c ^ 0xFFFFFFFF) >>> 0;
   }
 
@@ -97,5 +104,5 @@
     return zip(files);
   }
 
-  window.Exporter = { zip, xlsx, crc32 };
+  window.Exporter = { zip, xlsx, crc32, crc32Blob };
 })();

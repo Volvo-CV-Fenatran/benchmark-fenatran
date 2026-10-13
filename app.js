@@ -7,7 +7,11 @@
   // Fotos em alta resolução: lado maior até 4096 px (~12 MP, cobre a foto padrão de celular sem reduzir) e JPEG qualidade 0,92.
   // 4096 px também respeita o limite de área do canvas do iPhone (~16,7 MP).
   const MAX_PHOTOS = 20, MAX_SIDE = 4096, JPEG_Q = 0.92;
-  const PRIVACY_VERSION = 'lgpd-draft-1';
+  // Vídeos ficam como foram gravados (o navegador não consegue comprimir vídeo): limite por vídeo e por item.
+  const MAX_VIDEOS_AREA = 3, MAX_VIDEO_MB = 300;
+  const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/3gpp': '3gp', 'video/x-matroska': 'mkv' };
+  const isVideo = (p) => p.kind === 'video';
+  const PRIVACY_VERSION = 'lgpd-draft-2';
 
   // ---------- util ----------
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
@@ -98,7 +102,7 @@
         field('Nome *', f.name), field('E-mail *', f.email, 'Você informa o e-mail; o app não verifica a identidade.'),
         field('Função', f.role), field('Área', f.department)),
       h('div', { class: 'card' }, h('h2', {}, 'Privacidade (LGPD)'),
-        h('p', { class: 'muted' }, 'Seus dados, respostas e fotos ficam neste aparelho até você exportá-los e enviá-los à equipe organizadora do benchmark da Volvo. Usamos só para analisar a comparação entre caminhões. Não coletamos localização. Evite fotografar rostos, crachás e placas de pessoas. Você pode apagar tudo do aparelho a qualquer momento.'),
+        h('p', { class: 'muted' }, 'Seus dados, respostas e fotos ficam neste aparelho até você exportá-los e enviá-los à equipe organizadora do benchmark da Volvo. Usamos só para analisar a comparação entre caminhões. O app não lê a sua localização e remove os dados de localização das fotos. Os vídeos ficam como foram gravados e podem conter a localização se o celular estiver gravando com ela ativada. Evite fotografar ou filmar rostos, crachás e placas de pessoas. Você pode apagar tudo do aparelho a qualquer momento.'),
         h('label', { class: 'check' }, f.consent, h('span', {}, 'Li e concordo com o uso dos meus dados para este benchmark. *'))),
       err,
       h('button', {
@@ -130,16 +134,24 @@
     titleEl.textContent = 'Benchmark FENATRAN';
     saveEl.textContent = '';
     const evals = (await evalsAll()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    const photos = await photosAll();
-    const counts = {}; photos.forEach((p) => { counts[p.evalId] = (counts[p.evalId] || 0) + 1; });
+    kvSet('lastEval', null).catch(() => {});
+    const media = await photosAll();
+    const counts = {}, vids = {};
+    media.forEach((p) => {
+      if (isVideo(p)) { const v = vids[p.evalId] || (vids[p.evalId] = { n: 0, bytes: 0 }); v.n++; v.bytes += p.blob.size; }
+      else counts[p.evalId] = (counts[p.evalId] || 0) + 1;
+    });
     const exportBtn = (e) => e.status === 'done'
-      ? h('button', { type: 'button', class: 'secondary block', onclick: () => doExport(e.id) }, 'Exportar este benchmark (ZIP)')
+      ? h('div', {},
+        h('button', { type: 'button', class: 'secondary block', onclick: () => doExport(e.id) }, 'Exportar este benchmark (ZIP)'),
+        vids[e.id] ? h('button', { type: 'button', class: 'secondary block', onclick: () => doExport(e.id, false) }, 'Exportar sem vídeos (ZIP leve)') : null)
       : h('p', { class: 'muted' }, 'Conclua a avaliação para poder exportá-la.');
     const list = evals.length ? evals.map((e) => h('div', { class: 'eval-wrap' }, h('button', { class: 'eval', onclick: () => screenEval(e.id) },
       h('b', {}, (e.brand || '—') + ' ' + (e.model || '')),
       h('span', { class: 'badge ' + e.status }, e.status === 'done' ? 'Concluída' : 'Rascunho'),
       h('span', { class: 'badge' }, answeredCount(e) + '/' + Q.sections.length + ' respostas'),
       h('span', { class: 'badge' }, (counts[e.id] || 0) + ' fotos'),
+      vids[e.id] ? h('span', { class: 'badge' }, vids[e.id].n + ' vídeos (' + (vids[e.id].bytes / 1048576).toFixed(0) + ' MB)') : null,
       h('div', { class: 'muted' }, 'Atualizada em ' + fmtDate(e.updatedAt))),
       exportBtn(e))) : h('p', { class: 'muted center' }, 'Nenhuma avaliação ainda.');
     app.replaceChildren(
@@ -148,7 +160,7 @@
       h('button', { class: 'block', onclick: newEval }, '+ Nova avaliação de caminhão'),
       h('h2', { style: 'margin-top:18px' }, 'Minhas avaliações'), h('div', {}, list),
       h('div', { class: 'card' }, h('h2', {}, 'Exportar e enviar'),
-        h('p', { class: 'muted' }, 'Cada avaliação concluída tem o seu botão "Exportar este benchmark". O ZIP traz a planilha, os dados e as fotos só daquele caminhão, e o nome do arquivo tem o seu nome e o caminhão avaliado. Envie um arquivo por avaliação à equipe organizadora.')),
+        h('p', { class: 'muted' }, 'Cada avaliação concluída tem o seu botão "Exportar este benchmark". O ZIP traz a planilha, os dados, as fotos e os vídeos só daquele caminhão (se houver vídeos, também há uma opção de ZIP leve, sem vídeos), e o nome do arquivo tem o seu nome e o caminhão avaliado. Envie um arquivo por avaliação à equipe organizadora.')),
       h('div', { class: 'card' }, h('h2', {}, 'Instalar no celular'),
         h('p', { class: 'muted' }, 'Android (Chrome): menu ⋮ → Instalar app. iPhone (Safari): botão Compartilhar → Adicionar à Tela de Início. Abra uma vez com internet antes de ir à feira.')),
       h('button', { class: 'danger block', onclick: wipe }, 'Apagar todos os dados deste aparelho'),
@@ -198,12 +210,25 @@
     return new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('Falha ao comprimir')), 'image/jpeg', JPEG_Q));
   }
 
+  function videoDuration(blob) {
+    return new Promise((res) => {
+      const v = document.createElement('video'); v.preload = 'metadata';
+      const u = URL.createObjectURL(blob);
+      const done = (d) => { URL.revokeObjectURL(u); res(d); };
+      v.onloadedmetadata = () => done(isFinite(v.duration) ? Math.round(v.duration) : null);
+      v.onerror = () => done(null);
+      setTimeout(() => done(null), 4000);
+      v.src = u;
+    });
+  }
+
   // ---------- tela: avaliação ----------
   async function screenEval(id) {
     const all = await evalsAll();
     const ev = all.find((e) => e.id === id);
     if (!ev) return screenHome();
     titleEl.textContent = 'Avaliação';
+    kvSet('lastEval', id).catch(() => {});
     let photos = (await photosOf(id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const urls = new Map();
     const urlOf = (p) => { if (!urls.has(p.id)) urls.set(p.id, URL.createObjectURL(p.blob)); return urls.get(p.id); };
@@ -241,22 +266,28 @@
     const FICHA = 'ficha';
     const areaOf = (p) => p.sectionId || FICHA; // fotos antigas sem área contam como ficha
     const boxes = [];
-    const savePhotoMeta = (p) => photoPut({ id: p.id, evalId: p.evalId, sectionId: p.sectionId, blob: p.blob, caption: p.caption, createdAt: p.createdAt });
+    const savePhotoMeta = (p) => { const rec = Object.assign({}, p); delete rec._t; return photoPut(rec); };
+    const fmtDur = (s) => (s == null ? '' : Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'));
     function photoBox(area, max, captionHint) {
       const grid = h('div', { class: 'photos' });
       const count = h('div', { class: 'muted' });
       const draw = () => {
         const mine = photos.filter((p) => areaOf(p) === area);
-        count.textContent = mine.length + ' de ' + max + ' fotos';
-        grid.replaceChildren(...mine.map((p) => h('div', { class: 'photo' },
-          h('img', { src: urlOf(p), alt: p.caption || 'Foto' }),
+        const np = mine.filter((p) => !isVideo(p)).length, nv = mine.length - np;
+        count.textContent = np + ' de ' + max + ' fotos | ' + nv + ' de ' + MAX_VIDEOS_AREA + ' vídeos';
+        grid.replaceChildren(...mine.map((p) => h('div', { class: 'photo' + (isVideo(p) ? ' video' : '') },
+          isVideo(p)
+            ? h('video', { src: urlOf(p) + '#t=0.1', controls: true, preload: 'metadata', playsinline: true })
+            : h('img', { src: urlOf(p), alt: p.caption || 'Foto' }),
+          isVideo(p) ? h('div', { class: 'muted vmeta' }, '🎥 ' + (fmtDur(p.duration) ? fmtDur(p.duration) + ' | ' : '') + (p.blob.size / 1048576).toFixed(1) + ' MB') : null,
           h('input', { type: 'text', placeholder: captionHint || 'Legenda (opcional)', value: p.caption || '', oninput: (e) => { p.caption = e.target.value; clearTimeout(p._t); p._t = setTimeout(() => savePhotoMeta(p).then(() => { saveEl.textContent = 'Salvo ✓'; }).catch((er) => toast('Erro: ' + er.message)), 400); } }),
-          h('button', { onclick: async () => { if (!confirm('Remover esta foto?')) return; try { await photoDel(p.id); photos = photos.filter((x) => x !== p); URL.revokeObjectURL(urls.get(p.id)); urls.delete(p.id); draw(); } catch (er) { toast('Erro: ' + er.message); } } }, 'Remover'))));
+          h('button', { onclick: async () => { if (!confirm(isVideo(p) ? 'Remover este vídeo?' : 'Remover esta foto?')) return; try { await photoDel(p.id); photos = photos.filter((x) => x !== p); URL.revokeObjectURL(urls.get(p.id)); urls.delete(p.id); draw(); } catch (er) { toast('Erro: ' + er.message); } } }, 'Remover'))));
       };
-      const add = async (files) => {
+      const finishAdd = (ok) => { if (ok) { saveEl.textContent = 'Salvo ✓'; ev.updatedAt = now(); evalPut(ev).catch(() => {}); } };
+      const addPhotos = async (files) => {
         let ok = 0;
         for (const f of files) {
-          if (photos.filter((p) => areaOf(p) === area).length >= max) { toast('Limite de ' + max + ' fotos neste item.'); break; }
+          if (photos.filter((p) => areaOf(p) === area && !isVideo(p)).length >= max) { toast('Limite de ' + max + ' fotos neste item.'); break; }
           try {
             saveEl.textContent = 'Processando foto…';
             const blob = await compress(f);
@@ -264,15 +295,42 @@
             await photoPut(p); photos.push(p); ok++; draw();
           } catch (e) { toast('Foto não adicionada: ' + e.message); }
         }
-        if (ok) { saveEl.textContent = 'Salvo ✓'; ev.updatedAt = now(); evalPut(ev).catch(() => {}); }
+        finishAdd(ok);
+      };
+      const addVideos = async (files) => {
+        let ok = 0;
+        for (const f of files) {
+          const looksVideo = (f.type || '').startsWith('video/') || /\.(mp4|mov|m4v|3gp|webm|mkv)$/i.test(f.name || '');
+          if (!looksVideo) { toast('Escolha um arquivo de vídeo.'); continue; }
+          if (photos.filter((p) => areaOf(p) === area && isVideo(p)).length >= MAX_VIDEOS_AREA) { toast('Limite de ' + MAX_VIDEOS_AREA + ' vídeos neste item.'); break; }
+          if (f.size > MAX_VIDEO_MB * 1048576) { toast('Vídeo grande demais (' + Math.round(f.size / 1048576) + ' MB). O limite é ' + MAX_VIDEO_MB + ' MB: grave um clipe mais curto.'); continue; }
+          try {
+            saveEl.textContent = 'Salvando vídeo…';
+            if (navigator.storage && navigator.storage.estimate) {
+              const est = await navigator.storage.estimate();
+              if (est.quota && est.usage != null && est.quota - est.usage < f.size * 1.2) throw new Error('espaço insuficiente no aparelho');
+            }
+            const duration = await videoDuration(f);
+            const mime = f.type || 'video/mp4';
+            const ext = VIDEO_EXT[mime] || (((/\.([a-z0-9]+)$/i.exec(f.name || '') || [])[1] || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4');
+            const p = { id: uid(), evalId: ev.id, sectionId: area, kind: 'video', mime, ext, duration, name: f.name || '', blob: f, caption: '', createdAt: now() };
+            await photoPut(p); photos.push(p); ok++; draw();
+          } catch (e) { toast('Vídeo não adicionado: ' + e.message); }
+        }
+        finishAdd(ok);
       };
       const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
       const galIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
-      camIn.addEventListener('change', () => { add([...camIn.files]); camIn.value = ''; });
-      galIn.addEventListener('change', () => { add([...galIn.files]); galIn.value = ''; });
+      const vcamIn = h('input', { type: 'file', accept: 'video/*', capture: 'environment', hidden: true });
+      const vgalIn = h('input', { type: 'file', accept: 'video/*', multiple: true, hidden: true });
+      camIn.addEventListener('change', () => { addPhotos([...camIn.files]); camIn.value = ''; });
+      galIn.addEventListener('change', () => { addPhotos([...galIn.files]); galIn.value = ''; });
+      vcamIn.addEventListener('change', () => { addVideos([...vcamIn.files]); vcamIn.value = ''; });
+      vgalIn.addEventListener('change', () => { addVideos([...vgalIn.files]); vgalIn.value = ''; });
       const el = h('div', {},
         h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => camIn.click() }, '📷 Tirar foto'), h('button', { type: 'button', class: 'secondary', onclick: () => galIn.click() }, 'Galeria')),
-        camIn, galIn, count, grid);
+        h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { type: 'button', onclick: () => vcamIn.click() }, '🎥 Gravar vídeo'), h('button', { type: 'button', class: 'secondary', onclick: () => vgalIn.click() }, 'Vídeo da galeria')),
+        camIn, galIn, vcamIn, vgalIn, count, grid);
       boxes.push(draw);
       return el;
     }
@@ -290,7 +348,7 @@
       return h('div', { class: 'card', id: 'sec-' + s.id }, h('h2', {}, (i + 1) + '. ' + s.label),
         h('div', { class: 'scale' }, btns),
         h('div', { class: 'legend' }, h('span', {}, Q.scale.min + ' = ' + Q.scale.labels[Q.scale.min]), h('span', {}, Q.scale.max + ' = ' + Q.scale.labels[Q.scale.max])), ta,
-        h('details', { class: 'ph' }, h('summary', {}, '📷 Fotos deste item'), photoBox(s.id, 6, 'Legenda (opcional)')));
+        h('details', { class: 'ph' }, h('summary', {}, '📷 Fotos e vídeos deste item'), photoBox(s.id, 6, 'Legenda (opcional)')));
     });
 
     const general = h('textarea', { placeholder: 'Observações gerais (opcional)', oninput: (e) => { ev.generalComment = e.target.value; save(); } }); general.value = ev.generalComment || '';
@@ -312,12 +370,12 @@
         h('label', {}, 'Marca *'), brand, h('label', {}, 'Modelo *'), model, dlBrands, dlModels, progWrap,
         ev.status === 'done' ? h('p', { class: 'muted' }, 'Esta avaliação está concluída. Você ainda pode editar.') : null),
       h('div', { class: 'card' }, h('h2', {}, 'Panfleto, ficha técnica e dados gerais'),
-        h('p', { class: 'muted' }, 'Fotografe o panfleto de especificações, a ficha técnica e a placa/dados gerais deste caminhão. As fotos de cada item avaliado ficam dentro do próprio item, mais abaixo.'),
+        h('p', { class: 'muted' }, 'Fotografe o panfleto de especificações, a ficha técnica e a placa/dados gerais deste caminhão. As fotos e os vídeos de cada item avaliado ficam dentro do próprio item, mais abaixo. Prefira vídeos curtos (cerca de 30 segundos): cada minuto de vídeo pode ocupar dezenas de MB.'),
         fichaBox),
       ...cards,
       h('div', { class: 'card' }, h('h2', {}, 'Observações gerais'), general),
       err,
-      h('button', { class: 'danger block', onclick: async () => { if (!confirm('Excluir esta avaliação e suas fotos?')) return; clearTimeout(timer); await evalDelete(ev.id); release(); screenHome(); } }, 'Excluir avaliação'),
+      h('button', { class: 'danger block', onclick: async () => { if (!confirm('Excluir esta avaliação, suas fotos e vídeos?')) return; clearTimeout(timer); await evalDelete(ev.id); release(); screenHome(); } }, 'Excluir avaliação'),
       h('div', { class: 'bar' },
         h('button', { class: 'secondary', onclick: async () => { clearTimeout(timer); await save(true); release(); screenHome(); } }, 'Salvar e sair'),
         h('button', { onclick: finish }, ev.status === 'done' ? 'Concluir de novo' : 'Concluir'))
@@ -329,42 +387,58 @@
   // ---------- exportação ----------
   const slug = (s, n) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n).replace(/-+$/, '');
 
-  async function doExport(evalId) {
+  async function doExport(evalId, withVideos = true) {
     toast('Gerando arquivo…');
     try {
       const evals = (await evalsAll()).filter((e) => e.id === evalId);
       if (!evals.length) throw new Error('avaliação não encontrada');
-      const photos = await photosOf(evalId);
+      const media = (await photosOf(evalId)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const photos = media.filter((p) => !isVideo(p));
+      const videosAll = media.filter(isVideo);
+      const videos = withVideos ? videosAll : [];
+      const totalBytes = photos.concat(videos).reduce((s, p) => s + p.blob.size, 0);
+      if (totalBytes > 3.8e9) throw new Error('o arquivo passaria de 3,8 GB. Use "Exportar sem vídeos".');
       const byEval = {}; photos.forEach((p) => (byEval[p.evalId] = byEval[p.evalId] || []).push(p));
-      Object.values(byEval).forEach((l) => l.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+      const vByEval = {}; videos.forEach((p) => (vByEval[p.evalId] = vByEval[p.evalId] || []).push(p));
       const encoder = new TextEncoder();
       const files = [];
       const photoRows = [['ID avaliação', 'Marca', 'Modelo', 'Item', 'Arquivo no ZIP', 'Legenda', 'Tamanho (KB)', 'Data']];
+      const videoRows = [['ID avaliação', 'Marca', 'Modelo', 'Item', 'Arquivo no ZIP', 'Legenda', 'Duração (s)', 'Tamanho (MB)', 'Data']];
       const labelOf = (id) => id === 'ficha' ? 'Panfleto / ficha técnica / dados gerais' : ((Q.sections.find((s) => s.id === id) || {}).label || id);
       const areaKey = (p) => p.sectionId || 'ficha';
       const manifest = { schemaVersion: 1, exportedAt: now(), questionnaireVersion: Q.version, participant: profile, evaluations: [] };
 
       for (const e of evals) {
-        const list = byEval[e.id] || [], pf = [];
-        const n = {};
-        for (const p of list) {
+        const pf = [], vf = [], n = {}, nvid = {};
+        for (const p of byEval[e.id] || []) {
           const k = areaKey(p);
           n[k] = (n[k] || 0) + 1;
           const path = 'fotos/' + e.id + '/' + (k === 'ficha' ? '00_ficha_tecnica' : k) + '/foto-' + String(n[k]).padStart(2, '0') + '.jpg';
-          // CRC calculado uma foto por vez; o Blob em si não é copiado para a memória.
-          const crc = Exporter.crc32(new Uint8Array(await p.blob.arrayBuffer()));
+          const crc = await Exporter.crc32Blob(p.blob);   // lê em pedaços; o Blob não é copiado para a memória
           files.push({ name: path, blob: p.blob, crc, size: p.blob.size });
           pf.push({ item: k, itemLabel: labelOf(k), file: path, caption: p.caption || '', bytes: p.blob.size, createdAt: p.createdAt });
           photoRows.push([e.id, e.brand, e.model, labelOf(k), path, p.caption || '', Math.round(p.blob.size / 1024), fmtDate(p.createdAt)]);
         }
-        manifest.evaluations.push({ ...e, photos: pf });
+        let vi = 0;
+        for (const v of vByEval[e.id] || []) {
+          const k = areaKey(v);
+          nvid[k] = (nvid[k] || 0) + 1; vi++;
+          toast('Lendo vídeo ' + vi + ' de ' + (vByEval[e.id] || []).length + '…');
+          const ext = v.ext || VIDEO_EXT[v.mime] || 'mp4';
+          const path = 'videos/' + e.id + '/' + (k === 'ficha' ? '00_ficha_tecnica' : k) + '/video-' + String(nvid[k]).padStart(2, '0') + '.' + ext;
+          const crc = await Exporter.crc32Blob(v.blob);
+          files.push({ name: path, blob: v.blob, crc, size: v.blob.size });
+          vf.push({ item: k, itemLabel: labelOf(k), file: path, caption: v.caption || '', bytes: v.blob.size, mime: v.mime || '', durationSec: v.duration == null ? null : v.duration, createdAt: v.createdAt });
+          videoRows.push([e.id, e.brand, e.model, labelOf(k), path, v.caption || '', v.duration == null ? '' : v.duration, Math.round(v.blob.size / 104857.6) / 10, fmtDate(v.createdAt)]);
+        }
+        manifest.evaluations.push({ ...e, photos: pf, videos: vf, videosNotIncluded: withVideos ? 0 : videosAll.length });
       }
 
-      const wideHead = ['ID avaliação', 'Hora de início', 'Hora de conclusão', 'Status', 'E-mail', 'Nome', 'Função', 'Área', 'Marca', 'Modelo', 'Nº de fotos', 'Versão do questionário', 'Observações gerais', 'Fotos: Panfleto / ficha técnica'];
+      const wideHead = ['ID avaliação', 'Hora de início', 'Hora de conclusão', 'Status', 'E-mail', 'Nome', 'Função', 'Área', 'Marca', 'Modelo', 'Nº de fotos', 'Versão do questionário', 'Observações gerais', 'Fotos: Panfleto / ficha técnica', 'Nº de vídeos no ZIP'];
       Q.sections.forEach((s) => wideHead.push('Nota: ' + s.label, 'Comentários: ' + s.label, 'Fotos: ' + s.label));
       const wide = [wideHead], long = [['ID avaliação', 'Marca', 'Modelo', 'Nome', 'E-mail', 'Item', 'Nota', 'N/A', 'Comentário', 'Nº de fotos do item']];
       for (const e of evals) {
-        const row = [e.id, fmtDate(e.createdAt), e.status === 'done' ? fmtDate(e.updatedAt) : '', e.status === 'done' ? 'Concluída' : 'Rascunho', profile.email, profile.name, profile.role, profile.department, e.brand, e.model, (byEval[e.id] || []).length, e.questionnaireVersion, e.generalComment || '', (byEval[e.id] || []).filter((p) => areaKey(p) === 'ficha').length];
+        const row = [e.id, fmtDate(e.createdAt), e.status === 'done' ? fmtDate(e.updatedAt) : '', e.status === 'done' ? 'Concluída' : 'Rascunho', profile.email, profile.name, profile.role, profile.department, e.brand, e.model, (byEval[e.id] || []).length, e.questionnaireVersion, e.generalComment || '', (byEval[e.id] || []).filter((p) => areaKey(p) === 'ficha').length, (vByEval[e.id] || []).length];
         Q.sections.forEach((s) => {
           const a = e.answers[s.id] || {};
           const np = (byEval[e.id] || []).filter((p) => areaKey(p) === s.id).length;
@@ -373,17 +447,19 @@
         });
         wide.push(row);
       }
-      const xl = Exporter.xlsx([{ name: 'Avaliacoes', rows: wide }, { name: 'Respostas', rows: long }, { name: 'Fotos', rows: photoRows }]);
+      const sheets = [{ name: 'Avaliacoes', rows: wide }, { name: 'Respostas', rows: long }, { name: 'Fotos', rows: photoRows }];
+      if (videos.length) sheets.push({ name: 'Videos', rows: videoRows });
+      const xl = Exporter.xlsx(sheets);
       files.unshift({ name: 'benchmark_fenatran.xlsx', data: new Uint8Array(await xl.arrayBuffer()) },
         { name: 'dados.json', data: encoder.encode(JSON.stringify(manifest, null, 2)) });
       const blob = Exporter.zip(files);
       const ev0 = evals[0];
-      const fileName = 'fenatran_' + (slug(profile.name, 30) || 'avaliador') + '_' + (slug((ev0.brand || '') + ' ' + (ev0.model || ''), 40) || 'caminhao') + '_' + stamp() + '.zip';
-      showExportDialog(blob, fileName, ((ev0.brand || '') + ' ' + (ev0.model || '')).trim(), photos.length);
+      const fileName = 'fenatran_' + (slug(profile.name, 30) || 'avaliador') + '_' + (slug((ev0.brand || '') + ' ' + (ev0.model || ''), 40) || 'caminhao') + (withVideos ? '' : '_sem-videos') + '_' + stamp() + '.zip';
+      showExportDialog(blob, fileName, ((ev0.brand || '') + ' ' + (ev0.model || '')).trim(), photos.length, videos.length, withVideos ? 0 : videosAll.length);
     } catch (e) { toast('Falha ao exportar: ' + e.message); }
   }
 
-  function showExportDialog(blob, fileName, label, nPhotos) {
+  function showExportDialog(blob, fileName, label, nPhotos, nVideos, omitted) {
     const file = new File([blob], fileName, { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const isAndroid = /Android/i.test(navigator.userAgent);
@@ -417,7 +493,8 @@
 
     const m = h('div', { class: 'modal' }, h('div', {},
       h('h2', {}, 'Arquivo pronto'),
-      h('p', {}, h('b', {}, label), ' | ' + nPhotos + ' fotos | ' + (blob.size / 1048576).toFixed(1) + ' MB'),
+      h('p', {}, h('b', {}, label), ' | ' + nPhotos + ' fotos | ' + nVideos + ' vídeos | ' + (blob.size / 1048576).toFixed(1) + ' MB'),
+      omitted ? h('p', { class: 'muted' }, omitted + ' vídeo(s) ficaram de fora deste ZIP e continuam no aparelho. Exporte o benchmark completo quando tiver Wi-Fi.') : null,
       h('p', { class: 'muted' }, fileName),
       h('p', { class: 'muted' }, 'Envie para o canal indicado pela equipe organizadora. Os dados continuam no aparelho até você apagá-los.'),
       canShare ? h('button', { type: 'button', class: 'block', onclick: share }, 'Compartilhar…') : null,
@@ -440,7 +517,7 @@
         delete profile.area; await kvSet('profile', profile);
       }
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-      if (profile) screenHome(); else screenProfile(true);
+      if (profile) { const last = await kvGet('lastEval'); if (last) screenEval(last); else screenHome(); } else screenProfile(true);
     } catch (e) {
       app.replaceChildren(h('div', { class: 'card' }, h('h2', {}, 'Não foi possível abrir o armazenamento'),
         h('p', {}, 'Este app precisa de armazenamento local. Saia da navegação privada e tente de novo. Detalhe: ' + e.message)));
