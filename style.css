@@ -42,4 +42,5 @@ button:disabled { opacity:.5; }
 #toast.show { opacity:1; }
 .modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:flex-end; justify-content:center; z-index:40; }
 .modal > div { background:#fff; border-radius:16px 16px 0 0; padding:18px; width:100%; max-width:640px; padding-bottom:calc(18px + env(safe-area-inset-bottom)); }
+.eval-wrap { margin: 8px 0 14px; } .eval-wrap .eval { margin: 0; } .eval-wrap button.block { margin-top: 6px; }
 details.ph { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; } details.ph summary { cursor:pointer; font-weight:600; color:var(--blue); padding:6px 0; } details.ph > div { margin-top:8px; }

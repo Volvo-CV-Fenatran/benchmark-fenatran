@@ -132,20 +132,23 @@
     const evals = (await evalsAll()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const photos = await photosAll();
     const counts = {}; photos.forEach((p) => { counts[p.evalId] = (counts[p.evalId] || 0) + 1; });
-    const list = evals.length ? evals.map((e) => h('button', { class: 'eval', onclick: () => screenEval(e.id) },
+    const exportBtn = (e) => e.status === 'done'
+      ? h('button', { type: 'button', class: 'secondary block', onclick: () => doExport(e.id) }, 'Exportar este benchmark (ZIP)')
+      : h('p', { class: 'muted' }, 'Conclua a avaliação para poder exportá-la.');
+    const list = evals.length ? evals.map((e) => h('div', { class: 'eval-wrap' }, h('button', { class: 'eval', onclick: () => screenEval(e.id) },
       h('b', {}, (e.brand || '—') + ' ' + (e.model || '')),
       h('span', { class: 'badge ' + e.status }, e.status === 'done' ? 'Concluída' : 'Rascunho'),
       h('span', { class: 'badge' }, answeredCount(e) + '/' + Q.sections.length + ' respostas'),
       h('span', { class: 'badge' }, (counts[e.id] || 0) + ' fotos'),
-      h('div', { class: 'muted' }, 'Atualizada em ' + fmtDate(e.updatedAt)))) : h('p', { class: 'muted center' }, 'Nenhuma avaliação ainda.');
+      h('div', { class: 'muted' }, 'Atualizada em ' + fmtDate(e.updatedAt))),
+      exportBtn(e))) : h('p', { class: 'muted center' }, 'Nenhuma avaliação ainda.');
     app.replaceChildren(
       h('div', { class: 'card' }, h('div', {}, h('b', {}, profile.name)), h('div', { class: 'muted' }, profile.email),
         h('button', { class: 'secondary block', onclick: () => screenProfile(false) }, 'Editar perfil')),
       h('button', { class: 'block', onclick: newEval }, '+ Nova avaliação de caminhão'),
       h('h2', { style: 'margin-top:18px' }, 'Minhas avaliações'), h('div', {}, list),
       h('div', { class: 'card' }, h('h2', {}, 'Exportar e enviar'),
-        h('p', { class: 'muted' }, 'Gera um arquivo ZIP com planilha Excel, dados e fotos. Exporte ao fim de cada bloco de avaliações e envie à equipe organizadora.'),
-        h('button', { class: 'block', disabled: !evals.length, onclick: doExport }, 'Exportar tudo (ZIP)')),
+        h('p', { class: 'muted' }, 'Cada avaliação concluída tem o seu botão "Exportar este benchmark". O ZIP traz a planilha, os dados e as fotos só daquele caminhão, e o nome do arquivo tem o seu nome e o caminhão avaliado. Envie um arquivo por avaliação à equipe organizadora.')),
       h('div', { class: 'card' }, h('h2', {}, 'Instalar no celular'),
         h('p', { class: 'muted' }, 'Android (Chrome): menu ⋮ → Instalar app. iPhone (Safari): botão Compartilhar → Adicionar à Tela de Início. Abra uma vez com internet antes de ir à feira.')),
       h('button', { class: 'danger block', onclick: wipe }, 'Apagar todos os dados deste aparelho'),
@@ -324,11 +327,14 @@
   }
 
   // ---------- exportação ----------
-  async function doExport() {
+  const slug = (s, n) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n).replace(/-+$/, '');
+
+  async function doExport(evalId) {
     toast('Gerando arquivo…');
     try {
-      const evals = (await evalsAll()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      const photos = await photosAll();
+      const evals = (await evalsAll()).filter((e) => e.id === evalId);
+      if (!evals.length) throw new Error('avaliação não encontrada');
+      const photos = await photosOf(evalId);
       const byEval = {}; photos.forEach((p) => (byEval[p.evalId] = byEval[p.evalId] || []).push(p));
       Object.values(byEval).forEach((l) => l.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
       const encoder = new TextEncoder();
@@ -371,12 +377,13 @@
       files.unshift({ name: 'benchmark_fenatran.xlsx', data: new Uint8Array(await xl.arrayBuffer()) },
         { name: 'dados.json', data: encoder.encode(JSON.stringify(manifest, null, 2)) });
       const blob = Exporter.zip(files);
-      const fileName = 'fenatran_' + stamp() + '.zip';
-      showExportDialog(blob, fileName, evals.length, photos.length);
+      const ev0 = evals[0];
+      const fileName = 'fenatran_' + (slug(profile.name, 30) || 'avaliador') + '_' + (slug((ev0.brand || '') + ' ' + (ev0.model || ''), 40) || 'caminhao') + '_' + stamp() + '.zip';
+      showExportDialog(blob, fileName, ((ev0.brand || '') + ' ' + (ev0.model || '')).trim(), photos.length);
     } catch (e) { toast('Falha ao exportar: ' + e.message); }
   }
 
-  function showExportDialog(blob, fileName, nEval, nPhotos) {
+  function showExportDialog(blob, fileName, label, nPhotos) {
     const file = new File([blob], fileName, { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const isAndroid = /Android/i.test(navigator.userAgent);
@@ -410,7 +417,8 @@
 
     const m = h('div', { class: 'modal' }, h('div', {},
       h('h2', {}, 'Arquivo pronto'),
-      h('p', {}, nEval + ' avaliações, ' + nPhotos + ' fotos, ' + (blob.size / 1048576).toFixed(1) + ' MB.'),
+      h('p', {}, h('b', {}, label), ' | ' + nPhotos + ' fotos | ' + (blob.size / 1048576).toFixed(1) + ' MB'),
+      h('p', { class: 'muted' }, fileName),
       h('p', { class: 'muted' }, 'Envie para o canal indicado pela equipe organizadora. Os dados continuam no aparelho até você apagá-los.'),
       canShare ? h('button', { type: 'button', class: 'block', onclick: share }, 'Compartilhar…') : null,
       h('button', { type: 'button', class: canShare ? 'secondary block' : 'block', onclick: download }, 'Baixar ZIP'),
